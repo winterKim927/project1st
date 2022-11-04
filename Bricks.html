@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bricks</title>
+    <style>
+        body{background-color: #241919;}
+        #wrapper{width: 500px; height: 600px; position: relative;  margin: auto; margin-top: 30px; /*background-image: url(./images/start.png);*/ background-size: cover;}
+        #cover{width: 100%; height: 100%; position: absolute; z-index: 1;}
+        #stage{width: 500px; height: 600px; border: 2px solid #FEE350; border-bottom: 1px solid dodgerblue; position: relative; overflow: hidden;}
+    </style>
+    <script src="./classes/Brick.js"></script>
+    <script src="./classes/Bar.js"></script>
+    <script src="./classes/Ball.js"></script>
+    <script src="./classes/Heart.js"></script>
+    <script src="./classes/Stages.js"></script>
+    <script src="./classes/Sensors.js"></script>
+    <script src="./lib/util.js"></script>
+    <script>
+        
+        //골격 관련 변수
+        let wrapper;
+        let stage;
+        let cover;
+        
+        //게임내 객체에 관한 변수
+        let maxSpeed = 6.5; // 공의 최고속도, 난이도 조절
+        const BALL_ACCEL_RATIO = 1.2; //공의 속도 증가 계수, 30초마다.
+        const BALL_SIZE = 13;
+        const BALL_INIT_SPEED = 20;
+        const BRICK_WIDTH = 60;
+        const BRICK_HEIGHT = 15;
+        const BRICK_DISTANCE = 10;
+        let ballArray=[];
+        let bar;
+        let brickArray=[];
+        let heartArray=[];
+        let itemBrickArray=[];
+        let itemArray=[];
+        let sensorArrayL=[]; 
+        let sensorArrayR=[];
+
+        //게임 조작 관련 변수
+        let gameFlag=false;
+        let rightPressed = false;
+        let leftPressed = false;
+
+        //게임 레벨과 난이도에 관한 변수
+        let winCount=0;
+        let hpCount = 2; // 시작 hp - 1
+        let adjTime= 30000; //ball의 속도가 빨라지는 간격, 초기값 30초
+
+
+        // 스테이지의 일반 벽돌과 아이템 벽돌 배치
+        // 각 스테이지 호출을 위해 stage.js에 만들어둔 stage 맵은
+        // 3차원 배열을 활용
+        function setStage(n){
+            for (let i=0; i<stages[n].length; i++){
+                for (let j=0; j<stages[n][i].length; j++){
+                    if(stages[n][i][j]==1){
+                        let brick = new Brick("stage", 45+(BRICK_DISTANCE+BRICK_WIDTH)*j,20+(BRICK_DISTANCE+BRICK_HEIGHT)*i, BRICK_WIDTH, BRICK_HEIGHT);
+                        brickArray.push(brick);
+                    }
+                    else if(stages[n][i][j]==2){
+                        let brick = new ItemBrick("stage", 45+(BRICK_DISTANCE+BRICK_WIDTH)*j,20+(BRICK_DISTANCE+BRICK_HEIGHT)*i, BRICK_WIDTH, BRICK_HEIGHT);
+                        itemBrickArray.push(brick);
+                    }
+                }
+            }
+        }
+
+        // 볼 생성
+        // ball.velX의 값을 -4 ~ 4의 범위에서 랜덤으로. 1 이하가 나오면 볼의 각도가 너무 완만해지기 때문에
+        // 1 아래의 값은 제외하도록 하였다.
+        // ball.velY의 값은 ball의 시작 속도가 일정하도록 삼각함수로 정의.
+        function createBall(){
+            let rX=0;
+            while(Math.abs(rX)<1 || Math.abs(rX)>4){
+                rX=(getRandomFloatWithRange(-4,4));
+            }
+            let rY=Math.sqrt(BALL_INIT_SPEED-rX*rX);
+            let ball = new Ball("stage", bar.x+((bar.width)/2)-4, bar.y-18, BALL_SIZE, BALL_SIZE, rX, -rY);
+            ballArray.push(ball);
+        } 
+
+        //사용자가 조작할 bar 생성
+        function createBar(){
+            bar = new Bar("stage", 200, 580, 80, 15, 0, 0);
+        }
+
+        //화면에 표시될 남은 생명력 객체 생성
+        function createHeart(){
+            for(let i=0; i<hpCount+1; i++){
+                let heart = new Heart("stage", 270+(-35*i), 400, 30, 30);
+                heartArray.push(heart);
+            }
+        }
+        
+        
+
+        // 하나의 스테이지가 클리어되고 다음 스테이지를 세팅하는 함수
+        // 화면의 모든 객체를 지우고 스테이지에 맞게 다시 생성한다
+        function nextStage(){
+            for(let i=ballArray.length-1; i>=0; i--){
+                stage.removeChild(sensorArrayL[i].div);
+                stage.removeChild(sensorArrayR[i].div);
+                stage.removeChild(ballArray[i].div);
+            }
+            for(let i=itemArray.length-1; i>=0; i--){
+                stage.removeChild(itemArray[i].img);
+            }
+            stage.removeChild(bar.div);
+            sensorArrayL.splice(0);
+            sensorArrayR.splice(0);
+            ballArray.splice(0);
+            itemArray.splice(0);
+            createBar();
+            createBall();
+            setStage(winCount);
+        }
+        
+
+        // 키 조작에 관한 함수
+        // 이동은 bar 객체의 메서드로 처리
+        function keyDown(e) {
+            if (e.key == "ArrowRight") {
+                rightPressed = true;
+            } else if (e.key == "ArrowLeft") {
+                leftPressed = true;
+            } else if (e.key == " "){
+                if(winCount==6){
+                    document.location.reload();
+                } else {
+                    cover.style.display="none";
+                    gameFlag=!gameFlag;
+                }
+            } else if (e.key == "k"){//디버그용
+                debugging(); 
+            }
+
+        }
+
+        //키 조작에 관한 함수
+        function keyUp(e) {
+            if (e.key == "ArrowRight") {
+                rightPressed = false;
+            }
+            else if (e.key == "ArrowLeft") {
+                leftPressed = false;
+            }
+        }
+
+
+        function debugging(){ //디버깅용 함수
+            let len = brickArray.length;
+            for(let i=len-1; i>=0; i--){
+                stage.removeChild(brickArray[i].img);
+                brickArray.splice(i, 1);
+            }
+            len = itemBrickArray.length;
+            for(let i=len-1; i>=0; i--){
+                stage.removeChild(itemBrickArray[i].img);
+                itemBrickArray.splice(i, 1);
+            }
+        }
+        
+
+        //게임의 엔진, 심장
+        function gameLoop(){
+            if(gameFlag){ //일시정지 기능
+                for(let i=0; i<ballArray.length; i++){
+                    ballArray[i].tick();
+                    ballArray[i].render();
+                }
+                
+                bar.tick();
+                bar.render();
+                
+                for(let i=0;i<sensorArrayL.length;i++){
+                    sensorArrayL[i].tick();
+                    sensorArrayR[i].tick();
+                    sensorArrayL[i].render();
+                    sensorArrayR[i].render();
+                }
+                for(let i=0;i<itemArray.length;i++){
+                    itemArray[i].tick();
+                    itemArray[i].render();
+                }
+            }
+            setTimeout("gameLoop()", 10);
+        }
+
+        
+        function init(){
+            wrapper = document.getElementById("wrapper");
+            stage = document.getElementById("stage");
+            cover = document.getElementById("cover");
+            stage.style.width="500px";
+            stage.style.height="600px";
+
+            createBar();
+            createBall();
+            createHeart();
+            setStage(0);
+            
+            document.addEventListener("keydown", keyDown);
+            document.addEventListener("keyup", keyUp);
+
+            gameLoop();
+            
+        }
+
+        window.addEventListener("load", function(){
+            init();
+        })
+    </script>
+</head>
+<body>
+    <div id="wrapper">
+        <div id="stage">
+            <img src="./images/start.png" id="cover">
+        </div>
+    </div>
+</body>
+</html>
+
+<!-- 아이콘 등 출처
+하트 = https://www.iconfinder.com/icons/4096575/heart_like_love_icon
+아이템 = https://www.iconfinder.com/icons/6087975/capsule_drug_medicine_pill_tablet_icon 수정
+-->
